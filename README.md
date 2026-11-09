@@ -27,7 +27,7 @@ cp .env.example .env
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ~~~
 
-The service runs Telegram webhook mode when TELEGRAM_WEBHOOK_URL is set. Without it, the bot starts long polling (useful locally). On Render, use one web service and set TELEGRAM_WEBHOOK_URL to https://YOUR-SERVICE.onrender.com/telegram/webhook.
+Telegram updates are received through long polling only. On startup the app removes any previously registered webhook, then starts one polling loop. No incoming Telegram webhook port is required. The FastAPI web service listens on 0.0.0.0 and binds to the platform PORT variable (default 8000); Docker exposes TCP 8000. Render routes public HTTP traffic to that web-service port.
 
 ## Required environment
 
@@ -36,7 +36,7 @@ The service runs Telegram webhook mode when TELEGRAM_WEBHOOK_URL is set. Without
 - ADMIN_PASSWORD: password for the separate web admin console.
 - APP_SECRET: long random secret (32+ characters) used for sessions, share tokens and encryption-key derivation.
 - DATABASE_URL: persistent PostgreSQL URL recommended for deployment; SQLite is supported for local development.
-- PORT: HTTP port; the platform normally supplies this value. Local default is 8000.
+- PORT: HTTP listener port; the platform normally supplies this value. Local default is 8000. Only this one HTTP port is exposed.
 
 No API key is required in environment variables: providers are configured and encrypted in the admin console. The primary generation model is configured as one simple base URL + API key + model. Auxiliary task types have separate connection pools.
 
