@@ -108,6 +108,7 @@ async def run_agent(
     user_id: int,
     conversation_id: str,
     status_callback: Callable[[str], Awaitable[None]] | None = None,
+    ephemeral_context: str = "",
 ) -> str:
     started = time.monotonic()
     max_steps = await _runtime_int("agent_max_steps", settings.agent_max_steps, 1, 500)
@@ -115,6 +116,8 @@ async def run_agent(
     max_parallel = await _runtime_int("agent_max_parallel_tools", settings.agent_max_parallel_tools, 1, 50)
     max_output = await _runtime_int("agent_max_tool_result_chars", settings.agent_max_tool_result_chars, 1000, 100000)
     history = await _history(conversation_id)
+    if ephemeral_context:
+        history.append({"role": "user", "content": "Временное содержимое вложения (не сохранять в историю):\\n" + ephemeral_context[:40000]})
     if not history or history[-1]["role"] != "user":
         raise RuntimeError("No pending user message exists for this conversation")
 
