@@ -10,6 +10,7 @@ class Settings(BaseSettings):
 
     telegram_bot_token: str = ""
     telegram_webhook_url: str = ""
+    public_base_url: str = ""
     telegram_webhook_secret: str = ""
     telegram_webhook_path: str = "/telegram/webhook"
     telegram_polling: bool = True
