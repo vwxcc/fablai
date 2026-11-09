@@ -215,7 +215,7 @@ def to_telegram_html(value: str) -> str:
         source = raw
     else:
         raw = _convert_markdown_tables(raw)
-        source = MarkdownIt("commonmark", {"html": False, "breaks": True, "linkify": False}).render(raw)
+        source = MarkdownIt("commonmark", {"html": True, "breaks": True, "linkify": False}).render(raw)
     parser = _Sanitizer()
     parser.feed(source)
     parser.close()
