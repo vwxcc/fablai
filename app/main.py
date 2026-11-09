@@ -8,7 +8,7 @@ from datetime import timezone
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy import select
@@ -62,8 +62,8 @@ async def startup() -> None:
     global bot, polling_task
     await init_db()
     Path(settings.temp_upload_root).mkdir(parents=True, exist_ok=True)
-    if len(settings.app_secret) < 32:
-        log.error("APP_SECRET is missing or too short; admin provider-secret encryption will be unavailable")
+    if len(settings.app_secret.strip()) < 32 or settings.app_secret.startswith("replace-with-"):
+        raise RuntimeError("Set APP_SECRET to a unique random secret of at least 32 characters before startup")
     if not settings.telegram_bot_token:
         log.warning("TELEGRAM_BOT_TOKEN is not configured; the admin site and health endpoint will still start")
         return
