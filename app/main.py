@@ -8,9 +8,8 @@ from datetime import timezone
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher
-from aiogram.types import Update
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
 from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy import select
 
@@ -31,7 +30,7 @@ app.add_middleware(
     secret_key=session_secret,
     session_cookie="fablai_admin",
     same_site="strict",
-    https_only=bool(settings.telegram_webhook_url.startswith("https://")),
+    https_only=bool((settings.public_base_url or "").startswith("https://")),
     max_age=60 * 60 * 12,
 )
 app.include_router(admin_router)
@@ -39,6 +38,23 @@ app.include_router(admin_router)
 bot: Bot | None = None
 dispatcher = Dispatcher()
 polling_task: asyncio.Task | None = None
+
+
+async def _run_long_polling() -> None:
+    if bot is None:
+        return
+    try:
+        await dispatcher.start_polling(
+            bot,
+            handle_signals=False,
+            allowed_updates=dispatcher.resolve_used_update_types(),
+            close_bot_session=False,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.exception("Telegram long polling stopped unexpectedly")
+        raise
 
 
 @app.on_event("startup")
@@ -55,27 +71,13 @@ async def startup() -> None:
     bot = Bot(token=settings.telegram_bot_token)
     dispatcher.include_router(telegram_router)
 
-    if settings.telegram_webhook_url.strip():
-        if not settings.telegram_webhook_secret or len(settings.telegram_webhook_secret) < 16:
-            raise RuntimeError("TELEGRAM_WEBHOOK_SECRET with at least 16 characters is required for webhook mode")
-        target = settings.telegram_webhook_url.strip()
-        await bot.set_webhook(
-            url=target,
-            secret_token=settings.telegram_webhook_secret,
-            allowed_updates=dispatcher.resolve_used_update_types(),
-            drop_pending_updates=False,
-        )
-        log.info("Telegram webhook configured")
-    elif settings.telegram_polling:
-        await bot.delete_webhook(drop_pending_updates=False)
-        polling_task = asyncio.create_task(
-            dispatcher.start_polling(
-                bot,
-                handle_signals=False,
-                allowed_updates=dispatcher.resolve_used_update_types(),
-            )
-        )
-        log.info("Telegram long polling started")
+    # Long polling is the only supported Telegram update transport.
+    # Delete any webhook left by a previous deployment before starting polling.
+    await bot.delete_webhook(drop_pending_updates=False)
+    polling_task = asyncio.create_task(
+        _run_long_polling()
+    )
+    log.info("Telegram long polling started")
 
 
 @app.on_event("shutdown")
@@ -97,25 +99,6 @@ async def shutdown() -> None:
 @app.get("/healthz")
 async def healthz():
     return {"ok": True, "service": "fablai"}
-
-
-@app.post(settings.webhook_path)
-async def telegram_webhook(request: Request):
-    if bot is None:
-        raise HTTPException(status_code=503, detail="Telegram bot is not configured")
-    if not settings.telegram_webhook_url:
-        raise HTTPException(status_code=404, detail="Webhook mode is not enabled")
-    supplied = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-    if not settings.telegram_webhook_secret or supplied != settings.telegram_webhook_secret:
-        raise HTTPException(status_code=403, detail="Invalid webhook secret")
-    try:
-        payload = await request.json()
-        update = Update.model_validate(payload, context={"bot": bot})
-        await dispatcher.feed_update(bot, update)
-    except Exception:
-        log.exception("Could not process Telegram update")
-        raise HTTPException(status_code=400, detail="Invalid update")
-    return JSONResponse({"ok": True})
 
 
 @app.get("/s/{token}", response_class=HTMLResponse)
