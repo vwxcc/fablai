@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
+from datetime import timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -16,6 +16,12 @@ class QuotaExceeded(RuntimeError):
         self.limit = limit
         self.ends_at = ends_at
         super().__init__("The 12-hour token allowance has been exhausted")
+
+
+def _as_utc(value):
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 _user_locks: dict[int, asyncio.Lock] = {}
@@ -80,7 +86,7 @@ async def settle_tokens(user_id: int, reserved: int, actual: int | None) -> None
                 row = (await db.execute(
                     select(QuotaWindow).where(QuotaWindow.user_id == user_id).with_for_update()
                 )).scalars().one_or_none()
-                if row is None or row.window_ends_at <= utcnow():
+                if row is None or _as_utc(row.window_ends_at) <= utcnow():
                     return
                 charge = max(0, min(int(actual or 0), int(reserved)))
                 row.used_tokens = max(0, row.used_tokens - int(reserved) + charge)
