@@ -105,9 +105,12 @@ async def audio_request(
                 async with httpx.AsyncClient(timeout=provider.timeout_seconds) as client:
                     if file_field:
                         name, content, mime = file_field
+                        form_data = dict(data or {})
+                        if endpoint == "/audio/transcriptions":
+                            form_data["model"] = provider.model
                         response = await client.post(
                             url, headers=headers,
-                            data=data or {},
+                            data=form_data,
                             files={"file": (name, content, mime)},
                         )
                     else:
