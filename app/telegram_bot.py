@@ -157,7 +157,7 @@ async def _transcribe_voice(bot: Bot, message: Message) -> str:
     result, content_type, provider = await audio_request(
         "stt",
         "/audio/transcriptions",
-        data={"model": provider_model_placeholder(), "response_format": "json"},
+        data={"response_format": "json"},
         file_field=("voice" + suffix, content, "audio/ogg" if suffix == ".ogg" else "application/octet-stream"),
     )
     try:
@@ -168,11 +168,6 @@ async def _transcribe_voice(bot: Bot, message: Message) -> str:
     if not transcript:
         raise RuntimeError("Распознавание речи вернуло пустой текст.")
     return transcript
-
-
-def provider_model_placeholder() -> str:
-    # Model is read by audio_request from the selected connection in the updated call below.
-    return "whisper-1"
 
 
 async def _create_share(user_id: int, conversation_id: str) -> str:
@@ -256,6 +251,7 @@ async def handle_private_message(message: Message, bot: Bot) -> None:
 
     status = await message.answer("Запрос обрабатывается\nШаг агента: подготовка")
     last_edit = 0.0
+    Path(settings.temp_upload_root).mkdir(parents=True, exist_ok=True)
 
     async def on_phase(phase: str) -> None:
         nonlocal last_edit
@@ -289,8 +285,6 @@ async def handle_private_message(message: Message, bot: Bot) -> None:
                 # Binary images are not retained. The request remains text-only unless image input is configured later.
                 user_content = (user_content + "\n[Пользователь приложил изображение; в этой сборке визуальная обработка не подключена.]").strip()
 
-            if temp_context:
-                user_content += "\n\nСодержимое временного файла:\n" + temp_context
             if not user_content.strip():
                 user_content = "Пользователь отправил вложение без текстового описания."
             await _save_user_message(conversation, user_content)
@@ -299,6 +293,7 @@ async def handle_private_message(message: Message, bot: Bot) -> None:
                 user_id=user.telegram_id,
                 conversation_id=conversation.id,
                 status_callback=on_phase,
+                ephemeral_context=temp_context,
             )
 
         try:
