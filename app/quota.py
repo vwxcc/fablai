@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 
 from .config import settings
 from .db import SessionLocal
-from .models import QuotaWindow, utcnow
+from .models import AppSetting, QuotaWindow, utcnow
 
 
 class QuotaExceeded(RuntimeError):
@@ -33,6 +33,18 @@ async def reserve_tokens(user_id: int, amount: int) -> int:
         async with SessionLocal() as db:
             async with db.begin():
                 now = utcnow()
+                limit_row = await db.get(AppSetting, "user_token_limit")
+                window_row = await db.get(AppSetting, "user_limit_window_seconds")
+                try:
+                    dynamic_limit = int(limit_row.value) if limit_row else settings.user_token_limit
+                except (TypeError, ValueError):
+                    dynamic_limit = settings.user_token_limit
+                try:
+                    dynamic_window = int(window_row.value) if window_row else settings.user_limit_window_seconds
+                except (TypeError, ValueError):
+                    dynamic_window = settings.user_limit_window_seconds
+                dynamic_limit = max(1_000, min(100_000_000, dynamic_limit))
+                dynamic_window = max(60, min(604_800, dynamic_window))
                 row = (await db.execute(
                     select(QuotaWindow).where(QuotaWindow.user_id == user_id).with_for_update()
                 )).scalars().one_or_none()
@@ -40,20 +52,21 @@ async def reserve_tokens(user_id: int, amount: int) -> int:
                     row = QuotaWindow(
                         user_id=user_id,
                         window_started_at=now,
-                        window_ends_at=now + timedelta(seconds=settings.user_limit_window_seconds),
+                        window_ends_at=now + timedelta(seconds=dynamic_window),
                         used_tokens=0,
-                        limit_tokens=settings.user_token_limit,
+                        limit_tokens=dynamic_limit,
                     )
                     db.add(row)
                     try:
                         await db.flush()
                     except IntegrityError:
-                        raise QuotaExceeded(0, settings.user_token_limit, now)
+                        raise QuotaExceeded(0, dynamic_limit, now)
                 elif row.window_ends_at <= now:
                     row.window_started_at = now
-                    row.window_ends_at = now + timedelta(seconds=settings.user_limit_window_seconds)
+                    row.window_ends_at = now + timedelta(seconds=dynamic_window)
                     row.used_tokens = 0
-                    row.limit_tokens = settings.user_token_limit
+                    row.limit_tokens = dynamic_limit
+                row.limit_tokens = dynamic_limit
                 if row.used_tokens + amount > row.limit_tokens:
                     raise QuotaExceeded(row.used_tokens, row.limit_tokens, row.window_ends_at)
                 row.used_tokens += amount
@@ -67,7 +80,7 @@ async def settle_tokens(user_id: int, reserved: int, actual: int | None) -> None
                 row = (await db.execute(
                     select(QuotaWindow).where(QuotaWindow.user_id == user_id).with_for_update()
                 )).scalars().one_or_none()
-                if row is None:
+                if row is None or row.window_ends_at <= utcnow():
                     return
                 charge = max(0, min(int(actual or 0), int(reserved)))
                 row.used_tokens = max(0, row.used_tokens - int(reserved) + charge)
@@ -91,11 +104,16 @@ async def quota_status(user_id: int) -> dict:
         row = (await db.execute(
             select(QuotaWindow).where(QuotaWindow.user_id == user_id)
         )).scalars().one_or_none()
+        limit_row = await db.get(AppSetting, "user_token_limit")
+        try:
+            dynamic_limit = int(limit_row.value) if limit_row else settings.user_token_limit
+        except (TypeError, ValueError):
+            dynamic_limit = settings.user_token_limit
         if row is None or row.window_ends_at <= utcnow():
             return {
                 "used_tokens": 0,
-                "limit_tokens": settings.user_token_limit,
-                "remaining_tokens": settings.user_token_limit,
+                "limit_tokens": dynamic_limit,
+                "remaining_tokens": dynamic_limit,
                 "window_ends_at": None,
             }
         return {
