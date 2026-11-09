@@ -36,7 +36,7 @@ The service runs Telegram webhook mode when TELEGRAM_WEBHOOK_URL is set. Without
 - ADMIN_PASSWORD: password for the separate web admin console.
 - APP_SECRET: long random secret (32+ characters) used for sessions, share tokens and encryption-key derivation.
 - DATABASE_URL: persistent PostgreSQL URL recommended for deployment; SQLite is supported for local development.
-- TELEGRAM_WEBHOOK_SECRET: random webhook secret (required when webhook mode is used).
+- PORT: HTTP port; the platform normally supplies this value. Local default is 8000.
 
 No API key is required in environment variables: providers are configured and encrypted in the admin console. The primary generation model is configured as one simple base URL + API key + model. Auxiliary task types have separate connection pools.
 
@@ -66,4 +66,4 @@ Admin access is also available to configured Telegram IDs through /admin in a pr
 
 ## Health
 
-GET /healthz returns a minimal status response. The webhook endpoint is POST /telegram/webhook.
+GET /healthz returns a minimal status response. The Telegram bot receives updates through long polling. HTTP is used for the admin console, shared-conversation pages and health checks.
