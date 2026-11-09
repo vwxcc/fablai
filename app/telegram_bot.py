@@ -171,6 +171,11 @@ async def _transcribe_voice(bot: Bot, message: Message) -> str:
 
 
 async def _create_share(user_id: int, conversation_id: str) -> str:
+    if not await _setting_bool("shares_enabled", True):
+        raise RuntimeError("Создание ссылок отключено администратором.")
+    base = (settings.public_base_url or settings.telegram_webhook_url.rsplit(settings.webhook_path, 1)[0]).rstrip("/")
+    if not base:
+        raise RuntimeError("PUBLIC_BASE_URL or TELEGRAM_WEBHOOK_URL must be configured to create share links")
     token = secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
     async with SessionLocal() as db:
@@ -181,9 +186,6 @@ async def _create_share(user_id: int, conversation_id: str) -> str:
             expires_at=utcnow() + timedelta(days=30),
         ))
         await db.commit()
-    base = (settings.public_base_url or settings.telegram_webhook_url.rsplit(settings.webhook_path, 1)[0]).rstrip("/")
-    if not base:
-        raise RuntimeError("PUBLIC_BASE_URL or TELEGRAM_WEBHOOK_URL must be configured to create share links")
     return base + "/s/" + token
 
 
