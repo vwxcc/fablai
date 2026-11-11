@@ -37,12 +37,13 @@ Telegram updates are received through long polling only. On startup the app remo
 - APP_SECRET: long random secret (32+ characters) used for sessions, share tokens and encryption-key derivation.
 - DATABASE_URL: persistent PostgreSQL URL recommended for deployment; SQLite is supported for local development.
 - PORT: HTTP listener port; the platform normally supplies this value. Local default is 8000. Only this one HTTP port is exposed.
+- DEFAULT_MODEL: optional default OpenAI-compatible generation model ID. The protected admin console can override it; clearing the admin choice restores this environment default.
 
 No API key is required in environment variables: providers are configured and encrypted in the admin console. The primary generation model is configured as one simple base URL + API key + model. Auxiliary task types have separate connection pools.
 
 ## Admin
 
-Open /admin, authenticate with ADMIN_PASSWORD, and configure the primary generation API. Add auxiliary connections for Fetch, Search, TTS, STT, Sandbox or custom REST connectors as needed. Secrets are encrypted before being stored in the database and are never returned by admin API reads.
+Open /admin, authenticate with ADMIN_PASSWORD, and configure the primary generation API. Set DEFAULT_MODEL in Render to provide the default generation model ID, then choose an optional override in the admin console. The selected model is sent to generation connections in priority order; clearing the override restores DEFAULT_MODEL, or each connection’s own model when the environment variable is empty. Add auxiliary connections for Fetch, Search, TTS, STT, Sandbox or custom REST connectors as needed. Secrets are encrypted before being stored in the database and are never returned by admin API reads.
 
 Admin access is also available to configured Telegram IDs through /admin in a private chat; the bot returns the admin URL only to allowlisted IDs.
 

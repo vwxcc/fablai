@@ -12,6 +12,21 @@ class ProviderUnavailable(RuntimeError):
     pass
 
 
+def resolve_generation_model(admin_model: str | None, env_default: str | None) -> str | None:
+    """Resolve the global generation model: admin override first, then environment."""
+    for candidate in (admin_model, env_default):
+        value = str(candidate or "").strip()
+        if value:
+            return value[:200]
+    return None
+
+
+def resolve_request_model(provider_model: str, model_override: str | None = None) -> str:
+    """Use the global generation model when set; otherwise keep the provider model."""
+    override = str(model_override or "").strip()
+    return override[:200] if override else provider_model
+
+
 def _chat_url(base_url: str) -> str:
     value = base_url.rstrip("/")
     if value.endswith("/chat/completions"):
@@ -36,6 +51,7 @@ async def chat_completion(
     max_tokens: int = 4096,
     temperature: float = 0.2,
     forced_model: str | None = None,
+    model_override: str | None = None,
 ) -> tuple[dict[str, Any], Provider]:
     pool = await get_provider_pool(task_type)
     if forced_model:
@@ -49,7 +65,7 @@ async def chat_completion(
             errors.append(provider.label + ": API key is missing")
             continue
         payload: dict[str, Any] = {
-            "model": provider.model,
+            "model": resolve_request_model(provider.model, model_override),
             "messages": messages,
             "temperature": max(0.0, min(2.0, float(temperature))),
             "max_tokens": max(1, min(32768, int(max_tokens))),

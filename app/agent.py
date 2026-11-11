@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 from .config import settings
 from .db import SessionLocal
-from .llm import chat_completion
+from .llm import chat_completion, resolve_generation_model
 from .models import AppSetting, Message
 from .quota import estimate_tokens, reserve_tokens, settle_tokens, release_tokens, QuotaExceeded
 from .tools import TOOL_DEFINITIONS, fetch_url, run_python, search_web
@@ -45,6 +45,12 @@ async def _runtime_int(key: str, default: int, minimum: int, maximum: int) -> in
     except (TypeError, ValueError):
         value = int(default)
     return max(minimum, min(maximum, value))
+
+
+async def _runtime_text(key: str, max_length: int = 200) -> str:
+    async with SessionLocal() as db:
+        raw = await db.get(AppSetting, key)
+    return str(raw.value or "").strip()[:max_length] if raw else ""
 
 
 async def _history(conversation_id: str) -> list[dict[str, str]]:
@@ -115,6 +121,8 @@ async def run_agent(
     max_runtime = await _runtime_int("agent_max_runtime_seconds", settings.agent_max_runtime_seconds, 10, 7200)
     max_parallel = await _runtime_int("agent_max_parallel_tools", settings.agent_max_parallel_tools, 1, 50)
     max_output = await _runtime_int("agent_max_tool_result_chars", settings.agent_max_tool_result_chars, 1000, 100000)
+    admin_model = await _runtime_text("generation_model", 200)
+    generation_model = resolve_generation_model(admin_model, settings.default_model)
     history = await _history(conversation_id)
     if ephemeral_context:
         history.append({"role": "user", "content": "Временное содержимое вложения (не сохранять в историю):\\n" + ephemeral_context[:40000]})
@@ -150,6 +158,7 @@ async def run_agent(
                 tools=TOOL_DEFINITIONS,
                 max_tokens=4096,
                 temperature=0.2,
+                model_override=generation_model,
             )
             choice = response["choices"][0]
             assistant_message = choice.get("message") or {}

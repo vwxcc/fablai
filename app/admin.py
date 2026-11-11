@@ -49,10 +49,11 @@ button{border:0;border-radius:8px;padding:10px 14px;background:#29251f;color:whi
 </style></head><body>
 <header><strong>fablai / Admin</strong><a href="/admin/logout">Выйти</a></header>
 <main>
-<section><h2>Основная модель генерации</h2><p class="note">Одна основная модель OpenAI-compatible API. Для генерации используются активные подключения типа generation в порядке приоритета.</p>
+<section><h2>Основная модель генерации</h2><p class="note">Модель ниже применяется ко всем запросам агента через подключения generation. Значение DEFAULT_MODEL из Render используется по умолчанию; выбор администратора имеет приоритет. Пустое поле возвращает значение Render, а если оно не задано — используются модели самих подключений.</p>
+<form id="generationModelForm"><div class="grid"><div class="field wide"><label>Модель агента</label><input id="generationModel" name="generation_model" list="generationModelOptions" maxlength="200" placeholder="DEFAULT_MODEL из Render"><datalist id="generationModelOptions"></datalist><p class="note" id="generationModelStatus"></p></div></div><div class="actions"><button type="submit">Сохранить выбор модели</button><button type="button" class="secondary" id="resetGenerationModel">Использовать DEFAULT_MODEL из Render</button></div></form>
 <form id="generationForm"><input type="hidden" name="task_type" value="generation"><div class="grid">
 <div class="field"><label>Название подключения</label><input name="label" value="Основная модель" required></div>
-<div class="field"><label>Модель</label><input name="model" placeholder="model-id" required></div>
+<div class="field"><label>Модель подключения (резервная)</label><input name="model" placeholder="model-id" required></div>
 <div class="field wide"><label>Base URL</label><input name="base_url" placeholder="https://provider.example/v1" required></div>
 <div class="field wide"><label>API key</label><input name="api_key" type="password" autocomplete="new-password" placeholder="Новый ключ; пустое поле не меняет сохранённый ключ"></div>
 <div class="field"><label>Параллельные запросы</label><input name="max_parallel" type="number" min="1" max="50" value="2"></div>
@@ -112,6 +113,12 @@ async function load(){
  }
  const s=await json('/admin/api/settings');
  for(const [key,value] of Object.entries(s.settings)){const el=$('#settingsForm [name="'+key+'"]');if(el)el.value=String(value)}
+ $('#generationModel').value=s.settings.generation_model||'';
+ const choices=new Set([s.settings.default_model,...data.connections.filter(c=>c.task_type==='generation').map(c=>c.model)].filter(Boolean));
+ const options=$('#generationModelOptions');options.replaceChildren();
+ for(const model of choices){const option=document.createElement('option');option.value=model;options.appendChild(option)}
+ const active=s.settings.effective_generation_model||'модель из подключения';
+ $('#generationModelStatus').textContent='Сейчас используется: '+active+(s.settings.generation_model?' (выбор администратора)':(s.settings.default_model?' (Render DEFAULT_MODEL)':' (резервная модель подключения)'))+'.';
  const usage=await json('/admin/api/usage');const ub=$('#usage');ub.replaceChildren();
  for(const u of usage.users){const tr=document.createElement('tr');[u.telegram_id,u.username||u.first_name||'—',u.used_tokens,u.limit_tokens,u.window_ends_at||'—'].forEach(v=>{const td=document.createElement('td');td.textContent=String(v);tr.appendChild(td)});ub.appendChild(tr)}
 }
@@ -124,6 +131,8 @@ async function deleteConnection(id){if(!confirm('Удалить подключе
 $('#clearForm').onclick=()=>$('#connectionForm').reset();
 $('#connectionForm').onsubmit=async e=>{e.preventDefault();try{const f=e.target;const d=formObj(f);d.enabled=d.enabled==='true';d.options=d.options?JSON.parse(d.options):{};const id=d.id;delete d.id;await json('/admin/api/connections'+(id?'/'+id:''),{method:id?'PATCH':'POST',body:JSON.stringify(d)});f.reset();f.elements.max_parallel.value='2';f.elements.timeout_seconds.value='120';msg('Подключение сохранено.');await load()}catch(err){msg(err.message)}};
 $('#generationForm').onsubmit=async e=>{e.preventDefault();try{const d=formObj(e.target);d.max_parallel=Number(d.max_parallel);d.priority=Number(d.priority);const current=await json('/admin/api/connections?task_type=generation');const primary=current.connections.find(x=>x.label===d.label)||current.connections.find(x=>x.task_type==='generation');if(primary)await json('/admin/api/connections/'+primary.id,{method:'PATCH',body:JSON.stringify(d)});else await json('/admin/api/connections',{method:'POST',body:JSON.stringify(d)});msg('Основная модель сохранена.');await load()}catch(err){msg(err.message)}};
+$('#generationModelForm').onsubmit=async e=>{e.preventDefault();try{const d=formObj(e.target);await json('/admin/api/settings',{method:'PUT',body:JSON.stringify({generation_model:d.generation_model||''})});msg('Модель генерации сохранена.');await load()}catch(err){msg(err.message)}};
+$('#resetGenerationModel').onclick=async()=>{try{await json('/admin/api/settings',{method:'PUT',body:JSON.stringify({generation_model:''})});msg('Используется DEFAULT_MODEL из Render.');await load()}catch(err){msg(err.message)}};
 $('#settingsForm').onsubmit=async e=>{e.preventDefault();try{const d=formObj(e.target);for(const k of Object.keys(d)){if(['tts_auto_reply','shares_enabled'].includes(k))d[k]=d[k]==='true';else d[k]=Number(d[k])}await json('/admin/api/settings',{method:'PUT',body:JSON.stringify(d)});msg('Настройки сохранены.');await load()}catch(err){msg(err.message)}};
 load().catch(e=>msg(e.message));
 </script></body></html>"""
@@ -300,17 +309,23 @@ async def read_settings():
         "agent_max_runtime_seconds": settings.agent_max_runtime_seconds,
         "agent_max_parallel_tools": settings.agent_max_parallel_tools,
         "agent_max_tool_result_chars": settings.agent_max_tool_result_chars,
+        "generation_model": "",
+        "default_model": str(settings.default_model or "").strip()[:200],
+        "effective_generation_model": "",
         "tts_auto_reply": False,
         "shares_enabled": True,
     }
     for row in rows:
-        if row.key in NUMERIC_SETTINGS:
+        if row.key == "generation_model":
+            values["generation_model"] = str(row.value or "").strip()[:200]
+        elif row.key in NUMERIC_SETTINGS:
             try:
                 values[row.key] = int(row.value)
             except ValueError:
                 pass
         elif row.key in BOOLEAN_SETTINGS:
             values[row.key] = row.value.lower() in {"1", "true", "yes", "on"}
+    values["effective_generation_model"] = values["generation_model"] or values["default_model"]
     return {"settings": values}
 
 
@@ -334,6 +349,13 @@ async def write_settings(request: Request):
             if type(data[key]) is not bool:
                 raise HTTPException(status_code=422, detail=key + " must be a boolean")
             normalized[key] = "true" if data[key] else "false"
+    if "generation_model" in data:
+        if not isinstance(data["generation_model"], str):
+            raise HTTPException(status_code=422, detail="generation_model must be a string")
+        generation_model = data["generation_model"].strip()
+        if len(generation_model) > 200 or any(ord(char) < 32 for char in generation_model):
+            raise HTTPException(status_code=422, detail="generation_model must be at most 200 characters without control characters")
+        normalized["generation_model"] = generation_model
     async with SessionLocal() as db:
         for key, value in normalized.items():
             row = await db.get(AppSetting, key)

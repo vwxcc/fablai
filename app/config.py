@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     app_secret: str = ""
 
     database_url: str = "sqlite+aiosqlite:///./data/fablai.db"
+    default_model: str = ""
 
     user_token_limit: int = Field(default=1_000_000, ge=1_000, le=100_000_000)
     user_limit_window_seconds: int = Field(default=43_200, ge=60, le=604_800)
